@@ -13,6 +13,7 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
+import android.widget.LinearLayout;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -20,6 +21,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.here.sdk.core.Angle;
 import com.here.sdk.core.GeoCoordinates;
 import com.here.sdk.core.GeoPolyline;
@@ -74,6 +76,9 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
 
     private Context context;
     private MapViewLite mapView;
+
+    private LinearLayout bottomSheet;
+    private BottomSheetBehavior sheetBehavior;
     private Button addMarker;
 
     // current coordinate
@@ -100,6 +105,36 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
 
         mapView = findViewById(R.id.map_view);
         mapView.onCreate(savedInstanceState);
+
+        bottomSheet = findViewById(R.id.bottom_sheet);
+        sheetBehavior = BottomSheetBehavior.from(bottomSheet);
+        sheetBehavior.setBottomSheetCallback(new BottomSheetBehavior.BottomSheetCallback() {
+            @Override
+            public void onStateChanged(@NonNull View view, int newState) {
+                switch (newState) {
+                    case BottomSheetBehavior.STATE_HIDDEN:
+                        break;
+                    case BottomSheetBehavior.STATE_EXPANDED:
+                        break;
+                    case BottomSheetBehavior.STATE_COLLAPSED:
+                        break;
+                    case BottomSheetBehavior.STATE_DRAGGING:
+                        break;
+                    case BottomSheetBehavior.STATE_SETTLING:
+                        sheetBehavior.setHideable(false);
+                        break;
+                    case BottomSheetBehavior.STATE_HALF_EXPANDED:
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            @Override
+            public void onSlide(@NonNull View view, float v) {
+
+            }
+        });
 
         addMarker = findViewById(R.id.add_marker_button);
         addMarker.setOnClickListener(new View.OnClickListener() {
@@ -143,6 +178,13 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
         });
     }
 
+    private void removeCurrentRoute(){
+        if (mapView != null && routeMapPolyline != null){
+            mapView.getMapScene().removeMapPolyline(routeMapPolyline);
+            routeMapPolyline = null;
+        }
+    }
+
     private void showRoutingExample(Waypoint startWaypoint, Waypoint destinationWaypoint){
 
         if (routingEngine == null) {
@@ -157,10 +199,7 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
                     @Override
                     public void onRouteCalculated(@Nullable RoutingError routingError, @Nullable List<Route> routes) {
 
-                        if (mapView != null && routeMapPolyline != null){
-                            mapView.getMapScene().removeMapPolyline(routeMapPolyline);
-                            routeMapPolyline = null;
-                        }
+                        removeCurrentRoute();
 
                         if (routingError == null && routes != null && routes.get(0) != null) {
 
@@ -247,6 +286,7 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
                         .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(DialogInterface dialog, int which) {
+                                removeCurrentRoute();
                                 mapView.getMapScene().removeMapMarker(mapMarker);
                                 dialog.dismiss();
                             }
