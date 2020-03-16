@@ -9,6 +9,9 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -20,6 +23,8 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.here.sdk.core.Angle;
@@ -57,6 +62,7 @@ import com.syahputrareno975.heremapexample.R;
 import com.syahputrareno975.heremapexample.di.component.ActivityComponent;
 import com.syahputrareno975.heremapexample.di.component.DaggerActivityComponent;
 import com.syahputrareno975.heremapexample.di.module.ActivityModule;
+import com.syahputrareno975.heremapexample.ui.adapter.AdapterRouteTracking;
 import com.syahputrareno975.heremapexample.util.Unit;
 
 import org.jetbrains.annotations.NotNull;
@@ -67,6 +73,8 @@ import java.util.List;
 
 import javax.inject.Inject;
 
+import static com.syahputrareno975.heremapexample.util.StaticVariabel.LOCATION_REFRESH_DISTANCE;
+import static com.syahputrareno975.heremapexample.util.StaticVariabel.LOCATION_REFRESH_TIME;
 import static com.syahputrareno975.heremapexample.util.StaticVariabel.MY_PERMISSIONS_REQUEST_LOCATION;
 
 public class MapActivity extends AppCompatActivity implements MapActivityContract.View {
@@ -79,15 +87,21 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
 
     private LinearLayout bottomSheet;
     private BottomSheetBehavior sheetBehavior;
-    private Button addMarker;
+    private Button addMarkerButton;
 
-    // current coordinate
-    GeoCoordinates userCoordinate = new GeoCoordinates(-7.792810, 110.408499);
+    private LinearLayout layoutPlaceMarker;
+    private LinearLayout layoutShowRoute;
+    private RecyclerView listTracking;
+    private Button removeRoutingButton;
+
+    // location manager
+    private LocationManager locationManager;
+    private GeoCoordinates userCoordinate;
+    private MapMarker userMarker;
 
     // for routing
     private RoutingEngine routingEngine;
     private MapPolyline routeMapPolyline;
-
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -105,6 +119,31 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
 
         mapView = findViewById(R.id.map_view);
         mapView.onCreate(savedInstanceState);
+
+        layoutPlaceMarker = findViewById(R.id.layout_place_destination_layout);
+        layoutPlaceMarker.setVisibility(View.VISIBLE);
+
+        layoutShowRoute = findViewById(R.id.layout_route_info_linear_layout);
+        layoutShowRoute.setVisibility(View.GONE);
+
+        listTracking = findViewById(R.id.list_route_recycleview);
+
+        removeRoutingButton = findViewById(R.id.remove_route_button);
+        removeRoutingButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                layoutShowRoute.setVisibility(View.GONE);
+                layoutPlaceMarker.setVisibility(View.VISIBLE);
+                listTracking.setAdapter(new AdapterRouteTracking(context, new ArrayList<String>(), new Unit<String>() {
+                    @Override
+                    public void invoke(String o) {
+
+                    }
+                }));
+                listTracking.setLayoutManager(new LinearLayoutManager(context,LinearLayoutManager.VERTICAL,false));
+                removeCurrentRoute();
+            }
+        });
 
         bottomSheet = findViewById(R.id.bottom_sheet);
         sheetBehavior = BottomSheetBehavior.from(bottomSheet);
@@ -136,12 +175,19 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
             }
         });
 
-        addMarker = findViewById(R.id.add_marker_button);
-        addMarker.setOnClickListener(new View.OnClickListener() {
+        addMarkerButton = findViewById(R.id.add_marker_button);
+        addMarkerButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                setMarker(mapView.getCamera().getTarget(),"Marker","Empty Marker");
+                mapView.getMapScene().addMapMarker(createMarker(mapView.getCamera().getTarget(),"Marker","Marker is set"));
+
+                if (userCoordinate != null)
                 showRoutingExample(new Waypoint(userCoordinate),new Waypoint(mapView.getCamera().getTarget()));
+
+                layoutPlaceMarker.setVisibility(View.GONE);
+                layoutShowRoute.setVisibility(View.VISIBLE);
+
+                sheetBehavior.setState(BottomSheetBehavior.STATE_EXPANDED);
             }
         });
 
@@ -152,7 +198,6 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
         }
 
         requestLocationPermission(new Unit<Boolean>() {
-            @SuppressLint("MissingPermission")
             @Override
             public void invoke(Boolean o) {
                 loadMapScene();
@@ -164,18 +209,50 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
         mapView.getMapScene().loadScene(MapStyle.NORMAL_DAY, new MapScene.LoadSceneCallback() {
             @Override
             public void onLoadScene(@Nullable MapScene.ErrorCode errorCode) {
-                if (errorCode == null) {
-                    mapView.getCamera().setTarget(userCoordinate);
-                    mapView.getCamera().setZoomLevel(14);
-                } else {
-                    Log.e("map error",errorCode.toString());
-                }
 
-                setMarker(userCoordinate,"User","Current user position");
+                // akakom coordinate
+                mapView.getCamera().setTarget(new GeoCoordinates(-7.792810, 110.408499));
+                mapView.getCamera().setZoomLevel(14);
 
+                setLocationManager();
                 setTapGestureHandler();
             }
         });
+    }
+    @SuppressLint("MissingPermission")
+    private void setLocationManager(){
+        locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        if (locationManager != null)
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, LOCATION_REFRESH_TIME,
+                    LOCATION_REFRESH_DISTANCE, new LocationListener() {
+                        @Override
+                        public void onLocationChanged(Location location) {
+                            userCoordinate = new GeoCoordinates(location.getLatitude(),location.getLongitude());
+
+                            if (userMarker != null){
+                                mapView.getMapScene().removeMapMarker(userMarker);
+                                userMarker = null;
+                            }
+
+                            userMarker = createUserMarker(userCoordinate);
+                            mapView.getMapScene().addMapMarker(userMarker);
+                        }
+
+                        @Override
+                        public void onStatusChanged(String provider, int status, Bundle extras) {
+
+                        }
+
+                        @Override
+                        public void onProviderEnabled(String provider) {
+
+                        }
+
+                        @Override
+                        public void onProviderDisabled(String provider) {
+
+                        }
+                    });
     }
 
     private void removeCurrentRoute(){
@@ -191,7 +268,19 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
             return;
         }
 
+        ArrayList<String> route = new ArrayList<>();
+        route.add("Current Location");
+        route.add("Destination");
+        listTracking.setAdapter(new AdapterRouteTracking(context, route, new Unit<String>() {
+            @Override
+            public void invoke(String o) {
+
+            }
+        }));
+        listTracking.setLayoutManager(new LinearLayoutManager(context,LinearLayoutManager.VERTICAL,false));
+
         List<Waypoint> waypoints = new ArrayList<>(Arrays.asList(startWaypoint, destinationWaypoint));
+
         routingEngine.calculateRoute(
                 waypoints,
                 new RoutingEngine.CarOptions(),
@@ -218,7 +307,7 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
                 });
     }
 
-    private void setMarker(GeoCoordinates coordinates,String name,String message){
+    private MapMarker createMarker(GeoCoordinates coordinates,String name,String message){
 
         MapMarker defaultMarker = new MapMarker(coordinates);
 
@@ -232,7 +321,24 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
         metadata.setString("message", message);
         defaultMarker.setMetadata(metadata);
 
-        mapView.getMapScene().addMapMarker(defaultMarker);
+        return defaultMarker;
+    }
+
+    private MapMarker createUserMarker(GeoCoordinates coordinates){
+
+        MapMarker defaultMarker = new MapMarker(coordinates);
+
+        MapImage mapImage = MapImageFactory.fromResource(context.getResources(),R.drawable.user_current_marker);
+        MapMarkerImageStyle style = new MapMarkerImageStyle();
+        style.setScale(1.0f);
+        defaultMarker.addImage(mapImage, style);
+
+        Metadata metadata = new Metadata();
+        metadata.setString("name", "User");
+        metadata.setString("message", "Your Current Location");
+        defaultMarker.setMetadata(metadata);
+
+        return defaultMarker;
     }
 
     private void setTapGestureHandler() {
@@ -286,7 +392,6 @@ public class MapActivity extends AppCompatActivity implements MapActivityContrac
                         .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(DialogInterface dialog, int which) {
-                                removeCurrentRoute();
                                 mapView.getMapScene().removeMapMarker(mapMarker);
                                 dialog.dismiss();
                             }
